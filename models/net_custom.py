@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 from models.conv import *
 from models.stn import *
+from models.attention_modules import *
 from utils.disparity import *
 
 
@@ -15,12 +16,13 @@ class DisparityPrediction(nn.Module):
 
     def forward(self, x):
         x = self.conv(x)
-        x = self.sigmoid(x) * .3
+        # x = self.sigmoid(x) * .3
+        x = self.sigmoid(x)
 
         return x
 
 
-class DispNet2(nn.Module):
+class DepthNet(nn.Module):
     def __init__(self, img_size=(384, 768)):
         super().__init__()
         # Encoder
@@ -52,6 +54,17 @@ class DispNet2(nn.Module):
         self.disp2 = DisparityPrediction(64)
         self.disp1 = DisparityPrediction(32)
 
+        # Spatial Transformer Network
+        self.stn = STN(128, (96, 192))
+
+        # Attention module
+        self.cbam6 = CBAM(512, 1.5)
+        self.cbam5 = CBAM(512, 1.5)
+        self.cbam4 = CBAM(256, 1.5)
+        self.cbam3 = CBAM(128, 1.5)
+        self.cbam2 = CBAM(64, 1.5)
+        self.cbam1 = CBAM(32, 1.5)
+
     def forward(self, x):
         # Encoder
         x1 = self.conv1(x)
@@ -71,32 +84,39 @@ class DispNet2(nn.Module):
         up6 = self.upconv6(x6)
         cat6 = torch.cat([up6, skip5], dim=1)
         i6 = self.iconv6(cat6)
+        i6 = self.cbam6(i6)
 
         up5 = self.upconv5(i6)
         cat5 = torch.cat([up5, skip4], dim=1)
         i5 = self.iconv5(cat5)
+        i5 = self.cbam5(i5)
 
         up4 = self.upconv4(i5)
         cat4 = torch.cat([up4, skip3], dim=1)
         i4 = self.iconv4(cat4)
+        i4 = self.cbam4(i4)
         disp4 = self.disp4(i4)
         updisp4 = F.interpolate(disp4, scale_factor=2, mode='bilinear', align_corners=True)
 
         up3 = self.upconv3(i4)
         cat3 = torch.cat([up3, skip2, updisp4], dim=1)
         i3 = self.iconv3(cat3)
+        i3 = self.stn(i3)
+        i3 = self.cbam3(i3)
         disp3 = self.disp3(i3)
         updisp3 = F.interpolate(disp3, scale_factor=2, mode='bilinear', align_corners=True)
 
         up2 = self.upconv2(i3)
         cat2 = torch.cat([up2, skip1, updisp3], dim=1)
         i2 = self.iconv2(cat2)
+        i2 = self.cbam2(i2)
         disp2 = self.disp2(i2)
         updisp2 = F.interpolate(disp2, scale_factor=2, mode='bilinear', align_corners=True)
 
         up1 = self.upconv1(i2)
         cat1 = torch.cat([up1, updisp2], dim=1)
         i1 = self.iconv1(cat1)
+        i1 = self.cbam1(i1)
         disp1 = self.disp1(i1)
 
         return [disp1, disp2, disp3, disp4]
@@ -105,11 +125,9 @@ class DispNet2(nn.Module):
 if __name__ == '__main__':
     from torchsummary import summary
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    model = DispNet2().to(device)
+    model = DepthNet().to(device)
     x = torch.ones(2, 3, 384, 768).to(device)
-    out = model(x)
-    for o in out:
-        print(o.shape)
+    summary(model, (3, 384, 768))
 
 
 

@@ -1,0 +1,2 @@
+optimizer, epoch, lr, loss(train), loss, loss(ap), loss(ds)
+Adam, 1, 0.0001, 4.46127, 4.10131, 3.03700, 0.02430, 1.04001

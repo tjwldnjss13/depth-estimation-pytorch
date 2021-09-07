@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 
 from dataset.kitti_dataset import *
-from models.dispnet import *
+from models.net_custom import *
 from metrics.loss import *
 from utils.pytorch_util import *
 from utils.util import *
@@ -18,7 +18,7 @@ from utils.util import *
 
 def get_kitti_dataset():
     dset_name = 'kitti'
-    root = 'C://DeepLearningData/KITTI/'
+    root = 'D://DeepLearningData/KITTI/'
     dset_train = KITTIDataset(root, 'train')
     dset_val = KITTIDataset(root, 'val')
     collate_fn = custom_collate_fn
@@ -30,9 +30,9 @@ def adjust_learning_rate(optimizer, current_epoch):
     if isinstance(optimizer, optim.Adam):
         if current_epoch == 0:
             optimizer.param_groups[0]['lr'] = .0001
-        elif current_epoch == 30:
+        elif current_epoch == 5:
             optimizer.param_groups[0]['lr'] = .0001
-        elif current_epoch == 40:
+        elif current_epoch == 20:
             optimizer.param_groups[0]['lr'] = .0001
     elif isinstance(optimizer, optim.SGD):
         if current_epoch == 0:
@@ -50,15 +50,15 @@ def main():
     date_str = f'{now.date().year}{now.date().month:02d}{now.date().day:02d}'
     time_str = f'{now.time().hour:02d}{now.time().minute:02d}{now.time().second:02d}'
     record = open(f'./records/record_{date_str}_{time_str}.csv', 'w')
-    record.write('optimizer, epoch, lr, loss(train), loss, loss(ap), loss(ds)\n')
+    record.write('optimizer, epoch, lr, loss(train), loss, loss(ap), loss(ds), loss(lr)\n')
     record.close()
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch_size', required=False, type=int, default=8)
+    parser.add_argument('--batch_size', required=False, type=int, default=4)
     parser.add_argument('--lr', required=False, type=float, default=.0001)
     parser.add_argument('--momentum', required=False, type=float, default=.9)
     parser.add_argument('--weight_decay', required=False, type=float, default=.0005)
-    parser.add_argument('--epoch', required=False, type=int, default=200)
+    parser.add_argument('--epoch', required=False, type=int, default=50)
 
     args = parser.parse_args()
     batch_size = args.batch_size
@@ -68,11 +68,11 @@ def main():
     epoch = args.epoch
 
     dset_name, dset_train, dset_val, collate_fn = get_kitti_dataset()
-    train_loader = DataLoader(dataset=dset_train, batch_size=batch_size, shuffle=True, drop_last=False, collate_fn=collate_fn)
-    val_loader = DataLoader(dataset=dset_val, batch_size=batch_size, shuffle=False, drop_last=False, collate_fn=collate_fn)
+    train_loader = DataLoader(dataset=dset_train, batch_size=batch_size, shuffle=True, drop_last=False, collate_fn=collate_fn, num_workers=2)
+    val_loader = DataLoader(dataset=dset_val, batch_size=batch_size, shuffle=False, drop_last=False, collate_fn=collate_fn, num_workers=2)
 
-    model = DispNet().to(device)
-    model_name = 'dispnet'
+    model = DepthNet().to(device)
+    model_name = 'depthnet'
 
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     # optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=momentum)
@@ -81,7 +81,7 @@ def main():
     elif isinstance(optimizer, optim.SGD):
         optim_name = 'SGD'
     ckpt_pth = None
-    ckpt_pth = './pretrain/pretrain_Adam_dispnet_kitti_120epoch_0.000100lr_0.29564loss(train)_0.39318loss_0.38394loss(ap)_0.00403loss(ds)_0.00521loss(lr).ckpt'
+    # ckpt_pth = './pretrain/sigmoid x 0.3/pretrain_Adam_dispnet2_kitti_10epoch_0.000100lr_1.85431loss(train)_2.02557loss_1.92166loss(ap)_0.01510loss(ds)_0.08881loss(lr).ckpt'
     if ckpt_pth is not None:
         ckpt = torch.load(ckpt_pth)
         model.load_state_dict(ckpt['model_state_dict'])
@@ -118,7 +118,7 @@ def main():
             disp = model(imgl)
             # pred_imgr = predict_right_image_from_left_image_and_right_disparity(imgl, dr).to(device)
             optimizer.zero_grad()
-            loss, loss_ap, loss_ds, loss_lr = dispnet_loss(imgl, imgr, disp)
+            loss, loss_ap, loss_ds, loss_lr = depthnet_loss(imgl, imgr, disp)
             loss.backward()
             optimizer.step()
 
@@ -159,7 +159,7 @@ def main():
             imgr = make_batch(imgr).to(device)
 
             disp = model(imgl)
-            loss, loss_ap, loss_ds, loss_lr = dispnet_loss(imgl, imgr, disp)
+            loss, loss_ap, loss_ds, loss_lr = depthnet_loss(imgl, imgr, disp)
 
             val_loss += loss.detach().cpu().item()
             val_loss_ap += loss_ap
@@ -181,7 +181,7 @@ def main():
         record.write(record_str)
         record.close()
 
-        if (e + 1) % 5 == 0:
+        if (e + 1) % 5 == 0 or e == 0:
             save_pth = f'./save/{optim_name}_{model_name}_{dset_name}_{e+1}epoch_{lr:.6f}lr_{train_loss:.5f}loss(train)_{val_loss:.5f}loss_{val_loss_ap:.5f}loss(ap)_{val_loss_ds:.5f}loss(ds)_{val_loss_lr:.5f}loss(lr).ckpt'
             save_dict = {'model_state_dict': model.state_dict()}
             if optim_name == 'Adam':

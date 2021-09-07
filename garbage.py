@@ -2,6 +2,7 @@ import torch
 import torchvision.transforms as T
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+import math
 
 from PIL import Image
 
@@ -9,12 +10,8 @@ from metrics.ssim import *
 
 
 if __name__ == '__main__':
-    img_pth = 'samples/depth_example.png'
-    img = Image.open(img_pth)
-    img = np.array(img)
-    print(img.shape)
-    print(np.min(img), np.max(img))
-    plt.imshow(img)
-    plt.show()
+    a = math.floor(10.5)
+    print(a)
+    print(type(a))
 
 

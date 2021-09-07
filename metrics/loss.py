@@ -173,6 +173,28 @@ def appearance_matching_loss(image1, image2, alpha=.85):
 
     return loss
 
+
+def min_appearance_matching_loss(image1, image2, alpha=.85):
+    """
+    :param image1: tensor, [num batches, channels, height, width]
+    :param image2: tensor, [num_batches, channels, height, width]
+    :param alpha: float, 0~1
+    :return:
+    """
+    assert image1.shape == image2.shape
+
+    N_batch, _, h, w = image1.shape
+    N_pixel = h * w
+
+    loss_ssim = alpha * ((1 - ssim(image1, image2, 3)) / 2).min()
+    loss_l1 = (1 - alpha) * torch.abs(image1 - image2).min()
+    loss = loss_ssim + loss_l1
+
+    # print(f' ssim: {ssim(image1, image2, 3).detach().cpu().numpy()} loss_sim: {loss_ssim.detach().cpu().numpy()} \
+    #       loss_l1: {loss_l1.detach().cpu().numpy()} loss: {loss.detach().cpu().numpy()}')
+
+    return loss
+
 def get_image_derivative_x(image, filter=None):
     """
     :param image: tensor, [num batches, channels, height, width]
@@ -309,20 +331,39 @@ def dispnet_dr_loss(image_left, image_right, disparity_right):
     return loss, loss_ap.detach().cpu().item(), loss_ds.detach().cpu().item()
 
 
-def dispnet_loss(image_left, image_right, disparity):
+def depthnet_loss(image_left, image_right, disparities):
+
+    def get_image_pyramid(image, num_scale):
+        images_pyramid = []
+        h, w = image.shape[2:]
+        for i in range(num_scale):
+            h_scale, w_scale = h // (2 ** i), w // (2 ** i)
+            images_pyramid.append(F.interpolate(image, size=(h_scale, w_scale), mode='bilinear', align_corners=True))
+
+        return images_pyramid
+
     alpha_ap = 1
     alpha_ds = .1
     alpha_lr = 1
 
-    dr = disparity[:, 0].unsqueeze(1)
-    dl = disparity[:, 1].unsqueeze(1)
+    num_scale = 4
 
-    pred_imgr = get_image_from_disparity(image_left, dr)
-    pred_imgl = get_image_from_disparity(image_right, -dl)
+    dr_list = [d[:, 0].unsqueeze(1) for d in disparities]
+    dl_list = [d[:, 1].unsqueeze(1) for d in disparities]
 
-    loss_ap = alpha_ap * (appearance_matching_loss(image_right, pred_imgr) + appearance_matching_loss(image_left, pred_imgl))
-    loss_ds = alpha_ds * (disparity_smoothness_loss(image_right, dr) + disparity_smoothness_loss(image_left, dl))
-    loss_lr = alpha_lr * left_right_disparity_consistency_loss(dr, dl)
+    imgl_list = get_image_pyramid(image_left, num_scale)
+    imgr_list = get_image_pyramid(image_right, num_scale)
+
+    pred_imgr_list = [get_image_from_disparity(imgl_list[i], dr_list[i]) for i in range(num_scale)]
+    pred_imgl_list = [get_image_from_disparity(imgr_list[i], -dl_list[i]) for i in range(num_scale)]
+
+    loss_ap = [min_appearance_matching_loss(imgr_list[i], pred_imgr_list[i]) + min_appearance_matching_loss(imgl_list[i], pred_imgl_list[i]) for i in range(num_scale)]
+    loss_ds = [disparity_smoothness_loss(imgr_list[i], dr_list[i]) + disparity_smoothness_loss(imgl_list[i], dl_list[i]) for i in range(num_scale)]
+    loss_lr = [left_right_disparity_consistency_loss(dr_list[i], dl_list[i]) for i in range(num_scale)]
+
+    loss_ap = alpha_ap * sum(loss_ap)
+    loss_ds = alpha_ds * sum(loss_ds)
+    loss_lr = alpha_lr * sum(loss_lr)
 
     loss = loss_ap + loss_ds + loss_lr
 
